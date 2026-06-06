@@ -4,13 +4,12 @@ on:
   release:
     types: [created]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Build release binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -49,6 +48,8 @@ jobs:
   build-macos:
     name: Build ${{ matrix.artifact }}
     runs-on: macos-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -80,6 +81,8 @@ jobs:
   upload-install-script:
     name: Upload install scripts
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - name: Upload install.sh and install.ps1
@@ -88,3 +91,49 @@ jobs:
           files: |
             install.sh
             install.ps1
+
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-latest
+    needs: [build, build-macos]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry (OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Patch server.json with version, URLs, and SHA-256 hashes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          BASE="https://github.com/aniongithub/devcontainer-mcp/releases/download/${TAG}"
+
+          # Set top-level version
+          jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
+
+          # Download each platform artifact, compute SHA-256, patch identifier + hash
+          PLATFORMS=("linux-x64" "linux-arm64" "darwin-x64" "darwin-arm64")
+          for platform in "${PLATFORMS[@]}"; do
+            FILE="devcontainer-mcp-${platform}.tar.gz"
+            curl -fsSL --retry 5 --retry-delay 3 -o "$FILE" "${BASE}/${FILE}"
+            SHA="$(sha256sum "$FILE" | awk '{print $1}')"
+            URL="${BASE}/${FILE}"
+            jq --arg platform "$platform" --arg url "$URL" --arg sha "$SHA" \
+              '(.packages[] | select(.identifier | contains($platform))) |= (.identifier = $url | .fileSha256 = $sha)' \
+              server.json > server.tmp && mv server.tmp server.json
+          done
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
