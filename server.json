@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aniongithub/devcontainer-mcp",
+  "title": "devcontainer-mcp",
+  "description": "MCP server that lets AI agents create, manage, and work inside dev containers across Docker, DevPod, and GitHub Codespaces.",
+  "repository": {
+    "url": "https://github.com/aniongithub/devcontainer-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/aniongithub/devcontainer-mcp/releases/download/v0.0.0/devcontainer-mcp-linux-x64.tar.gz",
+      "fileSha256": "PLACEHOLDER",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/aniongithub/devcontainer-mcp/releases/download/v0.0.0/devcontainer-mcp-linux-arm64.tar.gz",
+      "fileSha256": "PLACEHOLDER",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/aniongithub/devcontainer-mcp/releases/download/v0.0.0/devcontainer-mcp-darwin-x64.tar.gz",
+      "fileSha256": "PLACEHOLDER",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/aniongithub/devcontainer-mcp/releases/download/v0.0.0/devcontainer-mcp-darwin-arm64.tar.gz",
+      "fileSha256": "PLACEHOLDER",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
