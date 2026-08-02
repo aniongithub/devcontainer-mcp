@@ -154,6 +154,16 @@ if ($loaderResult -match "OK") {
 $WslSkillDataPath = "~/.local/share/devcontainer-mcp/SKILL.md"
 wsl -d $WslDistro bash -c "curl -fsSL -o '$WslSkillDataPath' '$skillUrl'" 2>&1 | Out-Null
 
+# The host-protection hooks parse their JSON payload with jq inside WSL.
+# Without jq the hooks fail open (commands pass through), so protection is
+# effectively disabled until jq is installed in the WSL distro.
+$jqCheck = wsl -d $WslDistro bash -lc "command -v jq" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Ok "jq (host-protection hooks active)"
+} else {
+    Write-Fail "jq — hooks INACTIVE until installed — https://jqlang.github.io/jq/download/"
+}
+
 # Configure Claude Code PreToolUse + SessionStart hooks (Windows-side)
 Write-Step "Configuring agent hooks..."
 
