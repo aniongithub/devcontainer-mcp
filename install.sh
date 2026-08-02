@@ -3,12 +3,9 @@ set -euo pipefail
 
 # devcontainer-mcp installer
 # Downloads the latest release binary.
-# Backend CLIs:
-#   - devcontainer (@devcontainers/cli) is auto-installed via the official
-#     standalone installer (bundles its own Node.js runtime) into
-#     ~/.local/share/devcontainer-mcp/devcontainers/ when missing.
-#   - devpod and gh are detected only; if missing, the MCP server returns
-#     a helpful error message and the installer prints install URLs.
+# Backend CLIs (devcontainer, devpod, gh) are detected only; if missing,
+# the MCP server returns a helpful error message and the installer prints
+# install URLs. Nothing is downloaded silently on your behalf.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/aniongithub/devcontainer-mcp/main/install.sh | bash
@@ -307,32 +304,14 @@ echo ""
 echo "Backend CLIs detected (install as needed — MCP server gives helpful errors if missing):"
 command -v devpod       >/dev/null 2>&1 && echo "  ✓ devpod"       || echo "  ✗ devpod        — https://devpod.sh/docs/getting-started/install"
 
-# devcontainer CLI: auto-install via the official standalone installer
-# (bundles its own Node.js runtime — no system Node required) into a
-# folder we own, then symlink the binary into INSTALL_DIR so it picks
-# up the same PATH guidance the script gives for the main binary.
-install_devcontainer_cli() {
-  local cli_prefix="${HOME}/.local/share/devcontainer-mcp/devcontainers"
-  local installer_url="https://raw.githubusercontent.com/devcontainers/cli/main/scripts/install.sh"
-  echo "  … devcontainer CLI not found — installing standalone bundle into ${cli_prefix}"
-  mkdir -p "$(dirname "$cli_prefix")"
-  if ! curl -fsSL "$installer_url" | sh -s -- --prefix "$cli_prefix" >/dev/null 2>&1; then
-    echo "  ✗ devcontainer   — standalone install failed; see https://github.com/devcontainers/cli#install-script"
-    return 1
-  fi
-  local shim="${cli_prefix}/bin/devcontainer"
-  if [ ! -x "$shim" ]; then
-    echo "  ✗ devcontainer   — install completed but ${shim} is missing"
-    return 1
-  fi
-  ln -sf "$shim" "${INSTALL_DIR}/devcontainer"
-  echo "  ✓ devcontainer (auto-installed → ${INSTALL_DIR}/devcontainer)"
-}
-
+# devcontainer CLI: detect only. Installing @devcontainers/cli fetches from
+# the npm registry (registry.npmjs.org), which some corporate egress
+# policies block, so the installer never downloads it silently — it just
+# reports whether it is present, like the other backends.
 if command -v devcontainer >/dev/null 2>&1; then
   echo "  ✓ devcontainer"
 else
-  install_devcontainer_cli || true
+  echo "  ✗ devcontainer   — https://github.com/devcontainers/cli#install-script (or 'brew install devcontainer')"
 fi
 
 command -v gh           >/dev/null 2>&1 && echo "  ✓ gh (codespaces)" || echo "  ✗ gh (codespaces) — https://cli.github.com/"
