@@ -144,6 +144,13 @@ curl -fsSL -o "$LOADER_PATH" "$LOADER_URL" 2>/dev/null && \
   chmod +x "$LOADER_PATH" && \
   echo "    ${LOADER_PATH}" || echo "    ⚠ Could not download skill-loader hook"
 
+# The host-protection hooks parse their JSON payload with jq. Without jq the
+# hooks fail open (they allow commands through) so they can never block your
+# shell — but host protection is effectively disabled until jq is installed.
+command -v jq >/dev/null 2>&1 \
+  && echo "  ✓ jq (host-protection hooks active)" \
+  || echo "  ✗ jq            — hooks INACTIVE until installed — https://jqlang.github.io/jq/download/"
+
 # Install SKILL.md alongside hooks for the loader to find
 SKILL_DATA_PATH="${HOME}/.local/share/devcontainer-mcp/SKILL.md"
 curl -fsSL -o "$SKILL_DATA_PATH" "$SKILL_URL" 2>/dev/null && \

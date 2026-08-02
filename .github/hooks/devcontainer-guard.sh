@@ -17,51 +17,22 @@
 #   Claude Code:  { tool_name, tool_input, cwd, ... }
 #   Copilot CLI:  { toolName, toolArgs, cwd, ... }
 
-set -euo pipefail
+# Fail open by design. The ONLY way this hook blocks a command is by printing a
+# "deny" decision to stdout — blocking is NEVER signaled through the exit code.
+# All decision logic runs in a subshell (`decide`) whose stdout we capture: if
+# anything unexpected fails inside it (jq missing, an unparseable payload, a
+# failing helper), the subshell exits non-zero and we fall through to ALLOW.
+# This matters because an agent treats a non-zero hook exit as "deny", which
+# would block every command on the host — even in repos with no devcontainer.
+#
+# NOTE: we deliberately do NOT rely on an ERR trap + `exit`, because macOS ships
+# bash 3.2, where `exit` inside an ERR trap fired by a `var=$(cmd)` assignment
+# does not terminate the script. Capturing the subshell's exit status is the
+# portable way to fail open.
 
-INPUT=$(cat)
-
-# --- Detect agent format and extract fields ---
-
-# Try Claude Code fields first (snake_case), fall back to Copilot CLI (camelCase)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
-CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-
-# Only guard bash/shell tool calls — allow everything else through
-case "$TOOL_NAME" in
-  Bash|bash|shell|powershell|Shell|PowerShell) ;;
-  *) exit 0 ;;
-esac
-
-TOOL_INPUT=$(echo "$INPUT" | jq -r '(.tool_input // .toolArgs // {}) | tostring')
-
-# Check for the bypass string anywhere in the tool input
-if echo "$TOOL_INPUT" | grep -q 'USER_CONFIRMED_HOST_OPERATION=1'; then
-  exit 0
-fi
-
-# Check if a devcontainer exists in the working directory
-if [ -z "$CWD" ]; then
-  # No cwd in payload — can't determine context, allow through
-  exit 0
-fi
-
-if [ ! -f "${CWD}/.devcontainer/devcontainer.json" ]; then
-  # No devcontainer — allow through
-  exit 0
-fi
-
-# --- Devcontainer exists: check allowlist before blocking ---
-
-# Extract the command string from tool input (handles both formats)
-COMMAND=$(echo "$INPUT" | jq -r '(.tool_input.command // .toolArgs.command // "") | tostring')
-
-# Commands that are safe to run on the host even when a devcontainer exists.
-# These operate on the repo/host itself, not on the project's build environment.
-ALLOWED_HOST_COMMANDS=(
-  git
-  gh
-)
+# Agent hosts often spawn hooks with a minimal PATH that omits Homebrew
+# (/opt/homebrew/bin) and /usr/local/bin, where jq is commonly installed.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 # Extract all meaningful commands from a shell string, skipping env vars
 # (KEY=VALUE) and cd/pushd/popd. Splits on &&, ||, ;, and | to catch every
@@ -84,46 +55,98 @@ all_commands() {
   done < <(echo "$cmd" | sed 's/ *&& */\n/g; s/ *|| */\n/g; s/ *; */\n/g; s/ *| */\n/g')
 }
 
-# Every command in the chain must be on the allowlist
-ALL_ALLOWED=true
-while IFS= read -r cmd_name; do
-  [ -z "$cmd_name" ] && continue
-  FOUND=false
-  for allowed in "${ALLOWED_HOST_COMMANDS[@]}"; do
-    if [ "$cmd_name" = "$allowed" ]; then
-      FOUND=true
+# Prints a "deny" JSON decision to stdout ONLY when the tool call must be
+# blocked; prints nothing for every allow case. Runs with `set -e` so that a
+# missing dependency (jq) or malformed input aborts with a non-zero status,
+# which the caller turns into a fail-open ALLOW.
+decide() {
+  set -euo pipefail
+  local input="$1"
+  local tool_name cwd tool_input cmd_string reason
+  local all_allowed had_cmd cmd_name allowed found
+
+  # Try Claude Code fields first (snake_case), fall back to Copilot CLI (camelCase)
+  tool_name=$(printf '%s' "$input" | jq -r '.tool_name // .toolName // empty')
+  cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+
+  # Only guard bash/shell tool calls — allow everything else through
+  case "$tool_name" in
+    Bash|bash|shell|powershell|Shell|PowerShell) ;;
+    *) return 0 ;;
+  esac
+
+  tool_input=$(printf '%s' "$input" | jq -r '(.tool_input // .toolArgs // {}) | tostring')
+
+  # Bypass: allow when the operator explicitly confirmed a host operation
+  if printf '%s' "$tool_input" | grep -q 'USER_CONFIRMED_HOST_OPERATION=1'; then
+    return 0
+  fi
+
+  # No cwd in payload — can't determine context, allow through
+  [ -n "$cwd" ] || return 0
+
+  # No devcontainer in the working directory — allow through
+  [ -f "${cwd}/.devcontainer/devcontainer.json" ] || return 0
+
+  # --- Devcontainer exists: allow only if every command is host-safe ---
+  cmd_string=$(printf '%s' "$input" | jq -r '(.tool_input.command // .toolArgs.command // "") | tostring')
+
+  # Commands that are safe to run on the host even when a devcontainer exists.
+  # These operate on the repo/host itself, not on the project's build environment.
+  local ALLOWED_HOST_COMMANDS=(git gh)
+
+  all_allowed=true
+  had_cmd=false
+  while IFS= read -r cmd_name; do
+    [ -z "$cmd_name" ] && continue
+    had_cmd=true
+    found=false
+    for allowed in "${ALLOWED_HOST_COMMANDS[@]}"; do
+      if [ "$cmd_name" = "$allowed" ]; then
+        found=true
+        break
+      fi
+    done
+    if [ "$found" = false ]; then
+      all_allowed=false
       break
     fi
-  done
-  if [ "$FOUND" = false ]; then
-    ALL_ALLOWED=false
-    break
+  done < <(all_commands "$cmd_string")
+
+  # Every command in the chain was on the allowlist — allow through
+  if [ "$all_allowed" = true ] && [ "$had_cmd" = true ]; then
+    return 0
   fi
-done < <(all_commands "$COMMAND")
 
-if [ "$ALL_ALLOWED" = true ] && [ -n "$(all_commands "$COMMAND")" ]; then
-  exit 0
-fi
+  # --- Block: emit a deny decision in the right agent format ---
+  reason="Host execution blocked. This project has a devcontainer. Use devcontainer-mcp tools (devcontainer_exec, devpod_ssh, codespaces_ssh, and file operation tools) instead of running commands directly on the host."
 
-# --- Not on the allowlist: block the tool call ---
-
-DENY_REASON="Host execution blocked. This project has a devcontainer. Use devcontainer-mcp tools (devcontainer_exec, devpod_ssh, codespaces_ssh, and file operation tools) instead of running commands directly on the host."
-
-# Detect which agent format to use for the response
-if echo "$INPUT" | jq -e '.tool_name // empty' >/dev/null 2>&1 && \
-   [ -n "$(echo "$INPUT" | jq -r '.tool_name // empty')" ]; then
-  # Claude Code format
-  jq -n --arg reason "$DENY_REASON" '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
+  if [ -n "$(printf '%s' "$input" | jq -r '.tool_name // empty')" ]; then
+    # Claude Code format
+    jq -n --arg reason "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $reason
+      }
+    }'
+  else
+    # Copilot CLI format
+    jq -n --arg reason "$reason" '{
       permissionDecision: "deny",
       permissionDecisionReason: $reason
-    }
-  }'
+    }'
+  fi
+}
+
+INPUT=$(cat)
+
+if DECISION=$(decide "$INPUT"); then
+  # decide completed cleanly: DECISION is a deny JSON (block) or empty (allow)
+  [ -n "$DECISION" ] && printf '%s\n' "$DECISION"
 else
-  # Copilot CLI format
-  jq -n --arg reason "$DENY_REASON" '{
-    permissionDecision: "deny",
-    permissionDecisionReason: $reason
-  }'
+  # decide crashed (jq missing, unparseable payload, ...): FAIL OPEN (allow)
+  echo "devcontainer-guard: hook error; allowing tool call (install jq to enable host protection)." >&2
 fi
+
+exit 0
