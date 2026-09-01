@@ -11,7 +11,12 @@
 # Host-safe commands (git, gh, curl, etc.) are allowlisted and always permitted
 # since they operate on the repo/host, not the project's build environment.
 #
-# Bypass: include USER_CONFIRMED_HOST_OPERATION=1 in the command.
+# Per-repo opt-out: create a `.devcontainer-mcp-disable` file at the repo root
+# (next to the working directory) to turn this guard off entirely for that repo.
+# Useful when a project ships a stale/unmaintained `.devcontainer` that you don't
+# actually want to route work through.
+#
+# Bypass (single command): include USER_CONFIRMED_HOST_OPERATION=1 in the command.
 #
 # Supports both agent payload formats:
 #   Claude Code:  { tool_name, tool_input, cwd, ... }
@@ -87,6 +92,12 @@ decide() {
 
   # No devcontainer in the working directory — allow through
   [ -f "${cwd}/.devcontainer/devcontainer.json" ] || return 0
+
+  # Per-repo opt-out: a marker file at the repo root disables the guard so a
+  # stale/unmaintained devcontainer doesn't force everything through the MCP tools.
+  if [ -f "${cwd}/.devcontainer-mcp-disable" ]; then
+    return 0
+  fi
 
   # --- Devcontainer exists: allow only if every command is host-safe ---
   cmd_string=$(printf '%s' "$input" | jq -r '(.tool_input.command // .toolArgs.command // "") | tostring')

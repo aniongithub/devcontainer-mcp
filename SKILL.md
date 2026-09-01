@@ -60,6 +60,8 @@ You have access to `devcontainer-mcp`, an MCP server that manages dev container 
 
 **If a project has `.devcontainer/devcontainer.json`, ALL work MUST happen inside a dev container — never install dependencies, run builds, or execute code directly on the host.**
 
+> **Opt-out:** if a `.devcontainer-mcp-disable` marker file exists at the repo root, the host-protection guard is disabled for that repo — the devcontainer is treated as stale/unmaintained and you may work directly on the host.
+
 **Use ONLY the MCP tools listed here.** Do not invoke `docker`, `devcontainer`, `devpod`, or `gh` CLI commands directly — the MCP tools wrap these CLIs with proper error handling, auth resolution, and escaping. Direct CLI usage bypasses these safeguards.
 
 ## Authentication

@@ -5,6 +5,9 @@
 # injects the devcontainer-mcp SKILL.md content as additionalContext so the
 # agent automatically knows how to use devcontainer-mcp tools.
 #
+# Opt-out: a `.devcontainer-mcp-disable` marker file at the repo root skips the
+# injection (mirrors the devcontainer-guard opt-out).
+#
 # Supports both agent payload formats:
 #   Claude Code:  { tool_name, tool_input, cwd, ... }
 #   Copilot CLI:  { toolName, toolArgs, cwd, ... }
@@ -37,6 +40,10 @@ build_context() {
 
   [ -n "$cwd" ] || return 0
   [ -f "${cwd}/.devcontainer/devcontainer.json" ] || return 0
+
+  # Per-repo opt-out: if the guard is disabled for this repo, don't inject the
+  # container-only skill context either — the agent is expected to work locally.
+  [ ! -f "${cwd}/.devcontainer-mcp-disable" ] || return 0
 
   # Look for SKILL.md in order of preference
   SEARCH_PATHS=(
