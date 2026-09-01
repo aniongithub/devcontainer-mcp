@@ -66,6 +66,25 @@ Backend CLIs (`devpod`, `devcontainer`, `gh`) are detected at runtime — if one
 
 Binaries available for **linux-x64**, **linux-arm64**, **darwin-x64**, and **darwin-arm64**.
 
+## Host Protection & Opt-Out
+
+The installer configures two agent hooks (Claude Code & GitHub Copilot CLI) that activate **only** in a directory containing `.devcontainer/devcontainer.json`:
+
+- **`devcontainer-guard`** (PreToolUse) — blocks shell/command execution on the host so the agent routes builds, tests, and runs through the MCP tools instead. Host-safe commands (`git`, `gh`) are allowlisted, and both hooks *fail open* — if `jq` is missing or a payload can't be parsed, commands are allowed rather than blocked.
+- **`devcontainer-skill-loader`** (SessionStart) — injects the `SKILL.md` usage guide as context.
+
+### Turning it off for a repo
+
+Sometimes a project ships a stale or unmaintained `.devcontainer` that you don't actually want to route work through. To disable both hooks for that repo, drop a marker file at the repo root:
+
+```bash
+touch .devcontainer-mcp-disable
+```
+
+When `.devcontainer-mcp-disable` is present, the guard allows host commands through and the skill-loader skips context injection — the agent works locally as if no devcontainer were declared. Commit it (or add it to `.gitignore` for a local-only opt-out).
+
+**One-off bypass:** to run a single host command without disabling the guard, include `USER_CONFIRMED_HOST_OPERATION=1` anywhere in the command.
+
 ## Architecture
 
 ```mermaid
