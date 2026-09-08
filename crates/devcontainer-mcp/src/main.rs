@@ -1,8 +1,12 @@
+mod discovery_guard;
 mod tools;
 
 use clap::{Parser, Subcommand};
-use rmcp::transport::stdio;
+use rmcp::service::RoleServer;
+use rmcp::transport::{stdio, IntoTransport};
 use rmcp::ServiceExt;
+
+use discovery_guard::DiscoveryGuard;
 
 #[derive(Parser)]
 #[command(name = "devcontainer-mcp")]
@@ -32,7 +36,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Serve => {
             tracing::info!("Starting devcontainer-mcp MCP server over stdio");
             let service = tools::DevContainerMcp::new();
-            let server = service.serve(stdio()).await?;
+            // Wrap stdio so an optimistic pre-initialize `server/discover` probe
+            // (sent by some hosts, e.g. the GitHub Copilot CLI) is answered with
+            // `Method not found` instead of aborting the handshake.
+            let transport =
+                DiscoveryGuard::new(IntoTransport::<RoleServer, _, _>::into_transport(stdio()));
+            let server = service.serve(transport).await?;
             server.waiting().await?;
         }
     }
